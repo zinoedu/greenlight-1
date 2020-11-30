@@ -21,25 +21,27 @@ module Populator
 
   # Returns a list of users that are in the same context of the current user
   def manage_users_list
-    current_role = @role
-
-    initial_user = case @tab
+    initial_list = case @tab
       when "active"
         User.without_role([:pending, :denied])
       when "deleted"
         User.deleted
+      when "pending"
+        User.with_role(:pending)
+      when "denied"
+        User.with_role(:denied)
       else
         User.all
     end
 
-    current_role = Role.find_by(name: @tab, provider: @user_domain) if @tab == "pending" || @tab == "denied"
+    initial_list = initial_list.with_role(@role.name) if @role.present?
 
-    initial_list = initial_user.without_role(:super_admin) unless current_user.has_role? :super_admin
+    initial_list = initial_list.without_role(:super_admin)
 
     initial_list = initial_list.where(provider: @user_domain) if Rails.configuration.loadbalanced_configuration
 
     initial_list.where.not(id: current_user.id)
-                .admins_search(@search, current_role)
+                .admins_search(@search)
                 .admins_order(@order_column, @order_direction)
   end
 
@@ -82,5 +84,16 @@ module Populator
 
     return initial_list unless Rails.configuration.loadbalanced_configuration
     initial_list.where(provider: @user_domain)
+  end
+
+  # Returns a list off all current invitations
+  def invited_users_list
+    list = if Rails.configuration.loadbalanced_configuration
+      Invitation.where(provider: @user_domain)
+    else
+      Invitation.all
+    end
+
+    list.admins_search(@search).order(updated_at: :desc)
   end
 end

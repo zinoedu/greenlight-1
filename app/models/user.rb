@@ -35,12 +35,13 @@ class User < ApplicationRecord
 
   belongs_to :role, required: false
 
-  validates :name, length: { maximum: 256 }, presence: true
+  validates :name, length: { maximum: 256 }, presence: true,
+                   format: { without: %r{https?://}i }
   validates :provider, presence: true
   validate :check_if_email_can_be_blank
   validates :email, length: { maximum: 256 }, allow_blank: true,
                     uniqueness: { case_sensitive: false, scope: :provider },
-                    format: { with: /\A[\w+\-.]+@[a-z\d\-.]+\.[a-z]+\z/i }
+                    format: { with: /\A[\w+\-\'.]+@[a-z\d\-.]+\.[a-z]+\z/i }
 
   validates :password, length: { minimum: 6 }, confirmation: true, if: :greenlight_account?, on: :create
 
@@ -70,7 +71,9 @@ class User < ApplicationRecord
     end
   end
 
-  def self.admins_search(string, role)
+  def self.admins_search(string)
+    return all if string.blank?
+
     active_database = Rails.configuration.database_configuration[Rails.env]["adapter"]
     # Postgres requires created_at to be cast to a string
     created_at_query = if active_database == "postgresql"
@@ -79,22 +82,12 @@ class User < ApplicationRecord
       "created_at"
     end
 
-    search_query = ""
-    role_search_param = ""
-    if role.nil?
-      search_query = "users.name LIKE :search OR email LIKE :search OR username LIKE :search" \
-                    " OR users.#{created_at_query} LIKE :search OR users.provider LIKE :search" \
-                    " OR roles.name LIKE :roles_search"
-      role_search_param = "%#{string}%"
-    else
-      search_query = "(users.name LIKE :search OR email LIKE :search OR username LIKE :search" \
-                    " OR users.#{created_at_query} LIKE :search OR users.provider LIKE :search)" \
-                    " AND roles.name = :roles_search"
-      role_search_param = role.name
-    end
+    search_query = "users.name LIKE :search OR email LIKE :search OR username LIKE :search" \
+                  " OR users.#{created_at_query} LIKE :search OR users.provider LIKE :search" \
+                  " OR roles.name LIKE :search"
 
-    search_param = "%#{string}%"
-    where(search_query, search: search_param, roles_search: role_search_param)
+    search_param = "%#{sanitize_sql_like(string)}%"
+    where(search_query, search: search_param)
   end
 
   def self.admins_order(column, direction)
